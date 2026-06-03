@@ -639,7 +639,8 @@
             containerFormData.append('image', targetFile); 
 
             try {
-                const response = await fetch(API_BASE + '/api/upload-image', { method: 'POST', body: containerFormData });
+                // 🌟 CHANGED PATH FROM '/api/upload-image' TO '/api/upload' TO MATCH THE SERVER
+                const response = await fetch(API_BASE + '/api/upload', { method: 'POST', body: containerFormData });
                 const data = await response.json();
                 
                 if (data.success) {
