@@ -3,11 +3,39 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const admin = require('firebase-admin');
 
 const app = express();
 
 // ==========================================
-// 🛠️ LOCAL STORAGE SETUP (NO FIREBASE NEEDED)
+// 🔥 FIREBASE INITIALIZATION (AUTH ONLY)
+// ==========================================
+console.log('[Firebase Init] Checking environment variables...');
+console.log('FIREBASE_PROJECT_ID:', process.env.FIREBASE_PROJECT_ID ? '✓ Set' : '✗ MISSING');
+console.log('FIREBASE_CLIENT_EMAIL:', process.env.FIREBASE_CLIENT_EMAIL ? '✓ Set' : '✗ MISSING');
+console.log('FIREBASE_PRIVATE_KEY:', process.env.FIREBASE_PRIVATE_KEY ? '✓ Set' : '✗ MISSING');
+
+let authObj = null;
+if (admin.apps.length === 0 && process.env.FIREBASE_PROJECT_ID) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
+    });
+    authObj = admin.auth();
+    console.log('[Firebase Init] ✓ Successfully initialized for Authentication');
+  } catch (error) {
+    console.error('[Firebase Init] ✗ Failed to initialize:', error.message);
+  }
+} else if (!process.env.FIREBASE_PROJECT_ID) {
+  console.warn('[Firebase Init] ⚠️  Environment variables not set. Google Auth will not work.');
+}
+
+// ==========================================
+// 🛠️ LOCAL STORAGE SETUP (NO CLOUD STORAGE)
 // ==========================================
 const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
 
@@ -17,7 +45,7 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   console.log(`[Storage] Created uploads directory: ${UPLOADS_DIR}`);
 }
 
-console.log(`[Storage] Using local storage at: ${UPLOADS_DIR}`);
+console.log(`[Storage] Using local file storage at: ${UPLOADS_DIR}`);
 
 // ==========================================
 // ✅ CORS CONFIGURATION
@@ -149,6 +177,21 @@ app.post('/api/site-data', (req, res) => {
   }
 });
 
+// 4. Firebase ID Token Verification (optional - for future use)
+app.post('/api/verify-token', async (req, res) => {
+  if (!authObj) {
+    return res.status(500).json({ success: false, message: 'Firebase Auth not initialized' });
+  }
+
+  const { idToken } = req.body;
+  try {
+    const decodedToken = await authObj.verifyIdToken(idToken);
+    res.json({ success: true, uid: decodedToken.uid, email: decodedToken.email });
+  } catch (error) {
+    res.status(401).json({ success: false, message: 'Invalid token' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -166,7 +209,12 @@ const HOST = '0.0.0.0';
 const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 Oumiya Server running on ${HOST}:${PORT}`);
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`💾 Local file storage enabled (no Firebase needed)`);
+  console.log(`💾 Local file storage enabled (no Cloud Storage costs)`);
+  if (authObj) {
+    console.log(`🔐 Firebase Authentication enabled`);
+  } else {
+    console.log(`⚠️  Firebase Authentication NOT available - set environment variables`);
+  }
 });
 
 // Graceful shutdown
