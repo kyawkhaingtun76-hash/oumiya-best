@@ -10,18 +10,31 @@ const app = express();
 // ==========================================
 // 🔥 FIREBASE INITIALIZATION
 // ==========================================
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    }),
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-  });
-}
+console.log('[Firebase Init] Checking environment variables...');
+console.log('FIREBASE_PROJECT_ID:', process.env.FIREBASE_PROJECT_ID ? '✓ Set' : '✗ MISSING');
+console.log('FIREBASE_CLIENT_EMAIL:', process.env.FIREBASE_CLIENT_EMAIL ? '✓ Set' : '✗ MISSING');
+console.log('FIREBASE_PRIVATE_KEY:', process.env.FIREBASE_PRIVATE_KEY ? '✓ Set' : '✗ MISSING');
+console.log('FIREBASE_STORAGE_BUCKET:', process.env.FIREBASE_STORAGE_BUCKET ? '✓ Set' : '✗ MISSING');
 
-const bucket = admin.storage().bucket();
+let bucket = null;
+if (admin.apps.length === 0 && process.env.FIREBASE_PROJECT_ID) {
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    });
+    bucket = admin.storage().bucket();
+    console.log('[Firebase Init] ✓ Successfully initialized');
+  } catch (error) {
+    console.error('[Firebase Init] ✗ Failed to initialize:', error.message);
+  }
+} else if (!process.env.FIREBASE_PROJECT_ID) {
+  console.warn('[Firebase Init] ⚠️  Environment variables not set. Image uploads will fail.');
+}
 
 // ==========================================
 // ✅ ENHANCED CORS CONFIGURATION
@@ -90,9 +103,20 @@ const upload = multer({
 // 1. Firebase Image Upload Endpoint
 app.post('/api/upload', upload.single('image'), async (req, res) => {
   try {
+    if (!bucket) {
+      console.error('[Upload] Firebase not initialized - missing env vars');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Firebaseが初期化されていません。管理者にご連絡ください。' 
+      });
+    }
+
     if (!req.file) {
+      console.error('[Upload] No file provided');
       return res.status(400).json({ success: false, message: 'ファイルがアップロードされていません。' });
     }
+
+    console.log('[Upload] Starting upload for:', req.file.originalname);
 
     // Generate unique filename
     const uniqueSuffix = Date.now() + '_' + req.file.originalname.replace(/\s+/g, '_');
@@ -116,8 +140,8 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
     return res.json({ success: true, path: publicUrl });
 
   } catch (error) {
-    console.error('Firebase Upload Error:', error);
-    res.status(500).json({ success: false, message: 'サーバーエラーが発生しました。' });
+    console.error('[Upload Error]', error.message);
+    res.status(500).json({ success: false, message: `サーバーエラー: ${error.message}` });
   }
 });
 
@@ -163,6 +187,11 @@ app.get('*', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`🚀 Oumiya Local Server running on port ${PORT}`);
-  console.log(`🔥 Firebase Storage enabled`);
+  console.log(`🚀 Oumiya Server running on port ${PORT}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  if (bucket) {
+    console.log(`🔥 Firebase Storage enabled`);
+  } else {
+    console.log(`⚠️  Firebase Storage NOT available - set environment variables`);
+  }
 });
