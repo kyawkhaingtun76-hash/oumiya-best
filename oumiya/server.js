@@ -3,45 +3,27 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const admin = require('firebase-admin');
 
 const app = express();
 
 // ==========================================
-// 🔥 FIREBASE INITIALIZATION
+// 🛠️ LOCAL STORAGE SETUP (NO FIREBASE NEEDED)
 // ==========================================
-console.log('[Firebase Init] Checking environment variables...');
-console.log('FIREBASE_PROJECT_ID:', process.env.FIREBASE_PROJECT_ID ? '✓ Set' : '✗ MISSING');
-console.log('FIREBASE_CLIENT_EMAIL:', process.env.FIREBASE_CLIENT_EMAIL ? '✓ Set' : '✗ MISSING');
-console.log('FIREBASE_PRIVATE_KEY:', process.env.FIREBASE_PRIVATE_KEY ? '✓ Set' : '✗ MISSING');
-console.log('FIREBASE_STORAGE_BUCKET:', process.env.FIREBASE_STORAGE_BUCKET ? '✓ Set' : '✗ MISSING');
+const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
 
-let bucket = null;
-if (admin.apps.length === 0 && process.env.FIREBASE_PROJECT_ID) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      }),
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-    });
-    bucket = admin.storage().bucket();
-    console.log('[Firebase Init] ✓ Successfully initialized');
-  } catch (error) {
-    console.error('[Firebase Init] ✗ Failed to initialize:', error.message);
-  }
-} else if (!process.env.FIREBASE_PROJECT_ID) {
-  console.warn('[Firebase Init] ⚠️  Environment variables not set. Image uploads will fail.');
+// Create uploads directory if it doesn't exist
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  console.log(`[Storage] Created uploads directory: ${UPLOADS_DIR}`);
 }
 
+console.log(`[Storage] Using local storage at: ${UPLOADS_DIR}`);
+
 // ==========================================
-// ✅ ENHANCED CORS CONFIGURATION
+// ✅ CORS CONFIGURATION
 // ==========================================
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests from localhost (local dev), Render server, and the admin panel
     const allowedOrigins = [
       'http://localhost',
       'http://localhost:8080',
@@ -79,9 +61,20 @@ console.log(`[Static Serving] HTML/CSS assets are being served from: ${staticDir
 app.use(express.static(staticDir));
 
 // ==========================================
-// 💾 FIREBASE STORAGE CONFIGURATION (MULTER)
+// 💾 LOCAL FILE STORAGE CONFIGURATION (MULTER)
 // ==========================================
-const storage = multer.memoryStorage(); // Store in memory temporarily
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, UPLOADS_DIR);
+  },
+  filename: (req, file, cb) => {
+    // Create unique filename
+    const uniqueSuffix = Date.now() + '_' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    const name = path.basename(file.originalname, ext);
+    cb(null, name + '_' + uniqueSuffix + ext);
+  }
+});
 
 const upload = multer({ 
   storage: storage,
@@ -100,17 +93,9 @@ const upload = multer({
 // 🛰️ API ENDPOINTS
 // ==========================================
 
-// 1. Firebase Image Upload Endpoint
+// 1. Local Image Upload Endpoint
 app.post('/api/upload', upload.single('image'), async (req, res) => {
   try {
-    if (!bucket) {
-      console.error('[Upload] Firebase not initialized - missing env vars');
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Firebaseが初期化されていません。管理者にご連絡ください。' 
-      });
-    }
-
     if (!req.file) {
       console.error('[Upload] No file provided');
       return res.status(400).json({ success: false, message: 'ファイルがアップロードされていません。' });
@@ -118,34 +103,19 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
     console.log('[Upload] Starting upload for:', req.file.originalname);
 
-    // Generate unique filename
-    const uniqueSuffix = Date.now() + '_' + req.file.originalname.replace(/\s+/g, '_');
-    const filePath = `uploads/${uniqueSuffix}`;
-
-    // Upload to Firebase Storage
-    const file = bucket.file(filePath);
-    await file.save(req.file.buffer, {
-      metadata: {
-        contentType: req.file.mimetype,
-      },
-    });
-
-    // Make file publicly accessible
-    await file.makePublic();
-
-    // Get the public URL
-    const publicUrl = `https://storage.googleapis.com/${process.env.FIREBASE_STORAGE_BUCKET}/${filePath}`;
+    // Generate public URL
+    const publicUrl = `/uploads/${req.file.filename}`;
     
-    console.log(`[Upload Success] Image uploaded to Firebase: ${publicUrl}`);
+    console.log(`[Upload] ✓ Success: ${publicUrl}`);
     return res.json({ success: true, path: publicUrl });
 
   } catch (error) {
     console.error('[Upload Error]', error.message);
-    res.status(500).json({ success: false, message: `サーバーエラー: ${error.message}` });
+    res.status(500).json({ success: false, message: `アップロードエラー: ${error.message}` });
   }
 });
 
-// 2. Load Master Data (from local file for now)
+// 2. Load Master Data (from local file)
 const DATA_FILE_PATH = path.join(staticDir, 'master-data.json');
 
 app.get('/api/site-data', (req, res) => {
@@ -196,11 +166,7 @@ const HOST = '0.0.0.0';
 const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 Oumiya Server running on ${HOST}:${PORT}`);
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  if (bucket) {
-    console.log(`🔥 Firebase Storage enabled`);
-  } else {
-    console.log(`⚠️  Firebase Storage NOT available - set environment variables`);
-  }
+  console.log(`💾 Local file storage enabled (no Firebase needed)`);
 });
 
 // Graceful shutdown
