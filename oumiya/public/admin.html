@@ -206,6 +206,10 @@
         // Whitelisted Admin Email address
         const ADMIN_EMAIL_WHITELIST = "kd1427178@st.kobedenshi.ac.jp";
 
+        // 🛠️ SMART API ROUTER
+        // If loaded locally via folder, route API endpoints directly to your live Render server
+        const API_BASE = window.location.origin.includes('onrender.com') ? '' : 'https://oumiya-best.onrender.com';
+
         let runtimeState = { 
             topBannerText: "", 
             categories: [],
@@ -214,7 +218,6 @@
             menuData: [] 
         };
 
-        // Your web app's Firebase configuration explicitly defined
         const firebaseConfig = {
             apiKey: "AIzaSyALHmPvFihzHkByaDnw9wy1OvFx5TZIuKM",
             authDomain: "oumiya-a1fc6.firebaseapp.com",
@@ -225,7 +228,6 @@
             measurementId: "G-NY07MY0F07"
         };
 
-        // Firebase Initialisation
         let authObj = null;
         try {
             const app = initializeApp(firebaseConfig);
@@ -252,7 +254,6 @@
             }
         }
 
-        // Main & Only Authentication Pipeline via Google OAuth
         window.handleGoogleLoginOnly = async function() {
             const errorMsg = document.getElementById('auth-error-msg');
             const errorTextSpan = document.getElementById('error-text-span');
@@ -264,15 +265,13 @@
                     const user = result.user;
                     
                     if (user) {
-                        // Crucial security checkpoint: Verify email address
                         if (user.email === ADMIN_EMAIL_WHITELIST) {
                             sessionStorage.setItem('oumiya_admin_auth', 'true');
                             errorMsg.classList.add('hidden');
                             checkLocalAuth();
                             showNotificationToast("管理者認証に成功しました。ようこそ、おうみや管理画面へ。");
                         } else {
-                            // User is authenticated but is NOT whitelisted
-                            await signOut(authObj); // Sign out unauthorized user instantly
+                            await signOut(authObj); 
                             sessionStorage.removeItem('oumiya_admin_auth');
                             
                             errorTextSpan.innerHTML = `アカウント制限エラー：<br><span class="text-stone-100">${user.email}</span> は管理者として登録されていません。認証アカウントを切り替えてください。`;
@@ -285,8 +284,7 @@
                     errorMsg.classList.remove('hidden');
                 }
             } else {
-                // Mock Auth flow for local sandbox demo execution
-                const selectMock = confirm("【ローカルテスト】Firebase設定が検出されませんでした。管理者アカウント (kd1427178@st.kobhedenshi.ac.jp) としてテストログインしますか？");
+                const selectMock = confirm("【ローカルテスト】Firebase設定が検出されませんでした。管理者アカウント (kd1427178@st.kobedenshi.ac.jp) としてテストログインしますか？");
                 if (selectMock) {
                     sessionStorage.setItem('oumiya_admin_auth', 'true');
                     errorMsg.classList.add('hidden');
@@ -311,7 +309,6 @@
             checkLocalAuth();
         }
 
-        // Simple customized toast notification helper
         function showNotificationToast(message) {
             const successToast = document.createElement('div');
             successToast.className = "fixed bottom-5 right-5 z-50 bg-emerald-950 border border-emerald-500 text-stone-100 px-4 py-3 rounded text-sm shadow-xl flex items-center gap-2";
@@ -325,7 +322,7 @@
         // ==========================================
         async function initSystemState() {
             try {
-                const response = await fetch('/api/site-data');
+                const response = await fetch(API_BASE + '/api/site-data');
                 runtimeState = await response.json();
                 
                 document.getElementById('input-global-banner').value = runtimeState.topBannerText || "";
@@ -632,22 +629,17 @@
             const targetFile = inputNode.files[0];
             if (!targetFile) return;
 
+            // ⚠️ Client Size Check
+            if (targetFile.size > 5 * 1024 * 1024) {
+                alert("ファイルサイズが大きすぎます (最大5MB)。より小さな画像を選んでください。");
+                return;
+            }
+
             const containerFormData = new FormData();
             containerFormData.append('image', targetFile); 
 
             try {
-                let token = "";
-                if (authObj && authObj.currentUser) {
-                    token = await authObj.currentUser.getIdToken();
-                }
-
-                const response = await fetch('/api/upload-image', { 
-                    method: 'POST', 
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: containerFormData 
-                });
+                const response = await fetch(API_BASE + '/api/upload-image', { method: 'POST', body: containerFormData });
                 const data = await response.json();
                 
                 if (data.success) {
@@ -661,19 +653,12 @@
                         runtimeState.specialRecommendation.items[index].image = data.path;
                         renderSpecialAdministrationCards();
                     }
+                    showNotificationToast("画像が正常にアップロードされました！");
                 } else {
-                    const errorToast = document.createElement('div');
-                    errorToast.className = "fixed bottom-5 right-5 z-50 bg-red-950 border border-red-500 text-stone-100 px-4 py-3 rounded text-sm shadow-xl flex items-center gap-2";
-                    errorToast.innerHTML = `<i class="fa-solid fa-circle-exclamation text-red-500"></i> アップロード失敗しました: ${data.message}`;
-                    document.body.appendChild(errorToast);
-                    setTimeout(() => errorToast.remove(), 6000);
+                    alert(`アップロードに失敗しました: ${data.message}`);
                 }
             } catch (err) {
-                const errorToast = document.createElement('div');
-                errorToast.className = "fixed bottom-5 right-5 z-50 bg-red-950 border border-red-500 text-stone-100 px-4 py-3 rounded text-sm shadow-xl flex items-center gap-2";
-                errorToast.innerHTML = `<i class="fa-solid fa-circle-exclamation text-red-500"></i> 画像サーバーへの通信エラーが発生しました。`;
-                document.body.appendChild(errorToast);
-                setTimeout(() => errorToast.remove(), 6000);
+                alert("画像サーバーへの通信エラーが発生しました。Renderのログを確認してください。");
             }
         }
 
@@ -681,31 +666,18 @@
             runtimeState.topBannerText = document.getElementById('input-global-banner').value;
 
             try {
-                let token = "";
-                if (authObj && authObj.currentUser) {
-                    token = await authObj.currentUser.getIdToken();
-                }
-
-                const response = await fetch('/api/site-data', {
+                const response = await fetch(API_BASE + '/api/site-data', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}` 
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(runtimeState)
                 });
-                
                 const result = await response.json();
                 if (result.success) {
                     showNotificationToast(result.message);
                     initSystemState();
                 }
             } catch (err) {
-                const errorToast = document.createElement('div');
-                errorToast.className = "fixed bottom-5 right-5 z-50 bg-red-950 border border-red-500 text-stone-100 px-4 py-3 rounded text-sm shadow-xl flex items-center gap-2";
-                errorToast.innerHTML = `<i class="fa-solid fa-circle-exclamation text-red-500"></i> サーバーの更新処理中にエラーが発生しました。`;
-                document.body.appendChild(errorToast);
-                setTimeout(() => errorToast.remove(), 6000);
+                alert("サーバーへの保存処理中にエラーが発生しました。");
             }
         }
 
