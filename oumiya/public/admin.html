@@ -636,7 +636,18 @@
             containerFormData.append('image', targetFile); 
 
             try {
-                const response = await fetch('/api/upload-image', { method: 'POST', body: containerFormData });
+                let token = "";
+                if (authObj && authObj.currentUser) {
+                    token = await authObj.currentUser.getIdToken();
+                }
+
+                const response = await fetch('/api/upload-image', { 
+                    method: 'POST', 
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: containerFormData 
+                });
                 const data = await response.json();
                 
                 if (data.success) {
@@ -670,11 +681,20 @@
             runtimeState.topBannerText = document.getElementById('input-global-banner').value;
 
             try {
+                let token = "";
+                if (authObj && authObj.currentUser) {
+                    token = await authObj.currentUser.getIdToken();
+                }
+
                 const response = await fetch('/api/site-data', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}` 
+                    },
                     body: JSON.stringify(runtimeState)
                 });
+                
                 const result = await response.json();
                 if (result.success) {
                     showNotificationToast(result.message);
