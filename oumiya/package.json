@@ -1,14 +1,13 @@
 {
   "name": "oumiya-restaurant",
   "version": "1.0.0",
-  "description": "Oumiya Restaurant CMS",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "author": "Kyaw",
-  "license": "MIT",
   "dependencies": {
-    "express": "^5.1.0"
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.4.0"
   }
 }
