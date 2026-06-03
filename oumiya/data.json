@@ -1,0 +1,33 @@
+{
+  "topBannerText": "本日も元気に営業中！",
+
+  "categories": [
+    {
+      "key": "octopus",
+      "label": "明石だこ・鮮魚"
+    },
+    {
+      "key": "kushikatsu",
+      "label": "串カツ"
+    },
+    {
+      "key": "ippin",
+      "label": "逸品料理"
+    }
+  ],
+
+  "galleryData": [],
+
+  "menuData": [],
+
+  "specialRecommendation": {
+    "badge": "本日のおすすめ",
+    "subtitle": "Today's Special",
+    "title": "おすすめ料理",
+    "footer": {
+      "open": "16:00〜23:00",
+      "extra": "売切御免"
+    },
+    "items": []
+  }
+}
