@@ -1,76 +1,104 @@
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
+const cors = require("cors");
+const admin = require("firebase-admin");
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
-
-const DATA_FILE = path.join(__dirname, "data.json");
-
+app.use(cors());
 app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true }));
 
-// Serve HTML, CSS, JS, Images
-app.use(express.static("public"));
+// ===============================
+// FIREBASE ADMIN
+// ===============================
 
-function loadData() {
+admin.initializeApp({
+    credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+    })
+});
+
+const db = admin.firestore();
+
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+
+// ===============================
+// AUTH MIDDLEWARE
+// ===============================
+
+async function verifyAdmin(req, res, next) {
+
     try {
-        if (!fs.existsSync(DATA_FILE)) {
-            return {
-                topBannerText: "本日も元気に営業中！",
+
+        const authHeader = req.headers.authorization;
+
+        if (!authHeader) {
+            return res.status(401).json({
+                success: false,
+                message: "No token"
+            });
+        }
+
+        const token = authHeader.split("Bearer ")[1];
+
+        const decoded = await admin
+            .auth()
+            .verifyIdToken(token);
+
+        if (decoded.email !== ADMIN_EMAIL) {
+            return res.status(403).json({
+                success: false,
+                message: "Not admin"
+            });
+        }
+
+        req.user = decoded;
+
+        next();
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(401).json({
+            success: false,
+            message: "Unauthorized"
+        });
+
+    }
+
+}
+
+// ===============================
+// GET SITE DATA
+// ===============================
+
+app.get("/api/site-data", async (req, res) => {
+
+    try {
+
+        const doc = await db
+            .collection("siteData")
+            .doc("main")
+            .get();
+
+        if (!doc.exists) {
+
+            return res.json({
+                topBannerText: "",
                 categories: [],
                 galleryData: [],
                 menuData: [],
                 specialRecommendation: {
-                    badge: "",
-                    subtitle: "",
-                    title: "",
-                    footer: {},
-                    items: []
+                    items: [],
+                    footer: {}
                 }
-            };
+            });
+
         }
 
-        return JSON.parse(
-            fs.readFileSync(DATA_FILE, "utf8")
-        );
-
-    } catch (err) {
-        console.error(err);
-
-        return {
-            topBannerText: "",
-            categories: [],
-            galleryData: [],
-            menuData: [],
-            specialRecommendation: {
-                items: [],
-                footer: {}
-            }
-        };
-    }
-}
-
-function saveData(data) {
-    fs.writeFileSync(
-        DATA_FILE,
-        JSON.stringify(data, null, 2),
-        "utf8"
-    );
-}
-
-// ====================================
-// GET SITE DATA
-// ====================================
-
-app.get("/api/site-data", (req, res) => {
-
-    try {
-
-        const data = loadData();
-
-        res.json(data);
+        res.json(doc.data());
 
     } catch (err) {
 
@@ -85,49 +113,58 @@ app.get("/api/site-data", (req, res) => {
 
 });
 
-// ====================================
+// ===============================
 // SAVE SITE DATA
-// ====================================
+// ===============================
 
-app.post("/api/site-data", (req, res) => {
+app.post(
+    "/api/site-data",
+    verifyAdmin,
+    async (req, res) => {
 
-    try {
+        try {
 
-        saveData(req.body);
+            await db
+                .collection("siteData")
+                .doc("main")
+                .set(req.body);
 
-        res.json({
-            success: true,
-            message: "Data saved successfully"
-        });
+            res.json({
+                success: true,
+                message: "Saved successfully"
+            });
 
-    } catch (err) {
+        } catch (err) {
 
-        console.error(err);
+            console.error(err);
 
-        res.status(500).json({
-            success: false,
-            error: err.message
-        });
+            res.status(500).json({
+                success: false,
+                error: err.message
+            });
+
+        }
 
     }
+);
 
-});
-
-// ====================================
+// ===============================
 // HEALTH CHECK
-// ====================================
+// ===============================
 
 app.get("/api/health", (req, res) => {
 
     res.json({
         success: true,
-        server: "Oumiya Backend",
-        time: new Date()
+        service: "Oumiya Restaurant API",
+        timestamp: new Date()
     });
 
 });
 
-// ====================================
+// ===============================
+
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
 
