@@ -3,21 +3,35 @@ const cors = require('cors');
 const multer = require('multer');
 const admin = require('firebase-admin');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Serve all static files (like admin.html) from the current directory
-app.use(express.static(__dirname));
+// ==========================================
+// 🛠️ SMART PATH AUTO-DETECTION FOR HTML FILES
+// ==========================================
+// This automatically finds where index.html and admin.html are hidden!
+let staticDir = __dirname; // Option 1: inside /oumiya/
 
-// 1. Initialize Firebase Admin SDK using Render Environment Variables
+if (fs.existsSync(path.join(__dirname, 'public', 'index.html'))) {
+  staticDir = path.join(__dirname, 'public'); // Option 2: inside /oumiya/public/
+} else if (fs.existsSync(path.join(__dirname, '..', 'index.html'))) {
+  staticDir = path.join(__dirname, '..'); // Option 3: outside in the main root folder /
+}
+
+console.log(`[Static Serving] HTML/CSS assets are being served from: ${staticDir}`);
+app.use(express.static(staticDir));
+
+// ==========================================
+// 🔥 1. FIREBASE SECURE INITIALIZATION
+// ==========================================
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      // Fixes potential newline formatting issues in Render
       privateKey: process.env.FIREBASE_PRIVATE_KEY ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') : undefined,
     }),
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET
@@ -25,10 +39,10 @@ if (!admin.apps.length) {
 }
 
 const bucket = admin.storage().bucket();
-const db = admin.firestore(); // Ready if you use Firestore later
+const db = admin.firestore(); // Firestore database for permanent data retention
 
-// Temporary in-memory fallback database for your site-data configuration
-let siteMasterData = {
+// Default structural layout if your database is brand new and empty
+const DEFAULT_DATA = {
   topBannerText: "いらっしゃいませ！居酒屋 おうみや へようこそ！",
   categories: [
     { key: "cat_recommend", label: "店主イチオシ" },
@@ -40,99 +54,95 @@ let siteMasterData = {
   menuData: []
 };
 
-// 2. Configure Multer to use Memory Storage (Crucial for Cloud Services!)
-// This holds the file temporarily in RAM instead of creating local files on Render
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit per image
-  },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
 // ==========================================
-// ENDPOINT: IMAGE UPLOAD TO FIREBASE STORAGE
+// 📥 ENDPOINT: FETCH PERMANENT FIREBASE DATA
+// ==========================================
+app.get('/api/site-data', async (req, res) => {
+  try {
+    const doc = await db.collection('site').doc('masterData').get();
+    if (!doc.exists) {
+      // If Firestore is empty, return defaults so the page loads successfully
+      return res.json(DEFAULT_DATA);
+    }
+    res.json(doc.data());
+  } catch (error) {
+    console.error("Error fetching from Firestore:", error);
+    res.status(500).json({ error: "Failed to read database data" });
+  }
+});
+
+// ==========================================
+// 📤 ENDPOINT: SAVE PERMANENT FIREBASE DATA
+// ==========================================
+app.post('/api/site-data', async (req, res) => {
+  try {
+    if (req.body) {
+      // Saves menus and Today's Special items safely in the cloud forever
+      await db.collection('site').doc('masterData').set(req.body);
+      return res.json({ success: true, message: "変更がデータベースに永久保存されました！" });
+    }
+    res.status(400).json({ success: false, message: "無効なデータ送信です。" });
+  } catch (error) {
+    console.error("Error saving to Firestore:", error);
+    res.status(500).json({ success: false, message: "データベースへの保存に失敗しました。" });
+  }
+});
+
+// ==========================================
+// 📸 ENDPOINT: IMAGE UPLOAD TO FIREBASE
 // ==========================================
 app.post('/api/upload-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'ファイルがアップロードされていません。' });
+      return res.status(400).json({ success: false, message: 'ファイルが選択されていません。' });
     }
 
-    // Generate a unique filename to avoid duplicates overwriting each other
     const fileName = `uploads/${Date.now()}_${req.file.originalname.replace(/\s+/g, '_')}`;
     const file = bucket.file(fileName);
 
-    // Stream the file directly from memory into Firebase Storage
     const stream = file.createWriteStream({
-      metadata: {
-        contentType: req.file.mimetype,
-      },
+      metadata: { contentType: req.file.mimetype },
     });
 
     stream.on('error', (error) => {
       console.error('Firebase Upload Error:', error);
-      res.status(500).json({ success: false, message: 'Firebaseへのアップロードに失敗しました。' });
+      res.status(500).json({ success: false, message: 'アップロードに失敗しました。' });
     });
 
     stream.on('finish', async () => {
       try {
-        // Make the file publicly accessible so anyone visiting your website can see it
         await file.makePublic();
-        
-        // Construct the standard public access URL
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${file.name}`;
-        
-        // Return exact structure expected by your admin.html
-        return res.json({
-          success: true,
-          path: publicUrl
-        });
+        return res.json({ success: true, path: publicUrl });
       } catch (err) {
-        console.warn('Could not make file public via ACL, attempting Signed URL fallback:', err);
-        
-        // Fallback: Generate a long-lasting signed URL if your bucket prohibits public ACLs
-        try {
-          const [signedUrl] = await file.getSignedUrl({
-            action: 'read',
-            expires: '01-01-2099', 
-          });
-          return res.json({ success: true, path: signedUrl });
-        } catch (signedErr) {
-          return res.status(500).json({ success: false, message: '公開URLの生成に失敗しました。' });
-        }
+        const [signedUrl] = await file.getSignedUrl({ action: 'read', expires: '01-01-2099' });
+        return res.json({ success: true, path: signedUrl });
       }
     });
 
     stream.end(req.file.buffer);
-
   } catch (error) {
     console.error('Server Error:', error);
-    res.status(500).json({ success: false, message: 'サーバー内部エラーが発生しました。' });
+    res.status(500).json({ success: false, message: 'サーバーエラーが発生しました。' });
   }
 });
 
-// ==========================================
-// ENDPOINTS: DATA FETCH & RECOVERY
-// ==========================================
-app.get('/api/site-data', (req, res) => {
-  res.json(siteMasterData);
-});
-
-app.post('/api/site-data', (req, res) => {
-  if (req.body) {
-    siteMasterData = req.body;
-    return res.json({ success: true, message: "変更がサーバーに安全に同期されました！" });
-  }
-  res.status(400).json({ success: false, message: "無効なデータ送信です。" });
-});
-
-// Fallback to route any direct hits back to your admin page
+// Wildcard fallback to cleanly route users back to your homepage safely
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'));
+  const indexPath = path.join(staticDir, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('index.html could not be located. Please check your repository folders.');
+  }
 });
 
-// Start listening
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Secure Server executing natively on port ${PORT}`);
+  console.log(`Production database server online on port ${PORT}`);
 });
