@@ -5,7 +5,34 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-app.use(cors());
+
+// ==========================================
+// ✅ ENHANCED CORS CONFIGURATION
+// ==========================================
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests from localhost (local dev), Render server, and the admin panel
+    const allowedOrigins = [
+      'http://localhost',
+      'http://localhost:8080',
+      'http://127.0.0.1',
+      'http://127.0.0.1:8080',
+      'https://oumiya-best.onrender.com',
+    ];
+    
+    if (!origin || allowedOrigins.some(allowed => origin.includes(allowed))) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS policy violation'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 3600
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // ==========================================
@@ -43,7 +70,18 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    // Accept only image files
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 // ==========================================
 // 🛰️ API ENDPOINTS
@@ -58,6 +96,7 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
 
     // Build the relative web path for the image
     const publicUrl = `/uploads/${req.file.filename}`;
+    console.log(`[Upload Success] Image uploaded: ${publicUrl}`);
     return res.json({ success: true, path: publicUrl });
 
   } catch (error) {
@@ -81,10 +120,10 @@ app.get('/api/site-data', (req, res) => {
   // Return empty fallback structure if file doesn't exist yet
   res.json({
     topBannerText: "いらっしゃいませ！",
-    heroSlider: { items: [] },
-    recommendMenu: { items: [] },
-    galleryGrid: { items: [] },
-    specialRecommendation: { items: [] }
+    categories: [],
+    menuData: [],
+    galleryData: [],
+    specialRecommendation: { items: [], footer: {} }
   });
 });
 
@@ -92,6 +131,7 @@ app.get('/api/site-data', (req, res) => {
 app.post('/api/site-data', (req, res) => {
   try {
     fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(req.body, null, 2), 'utf8');
+    console.log(`[Save Success] Master data saved to ${DATA_FILE_PATH}`);
     res.json({ success: true, message: '設定がローカルファイルに保存されました！' });
   } catch (error) {
     console.error('Save Data Error:', error);
@@ -108,4 +148,5 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`🚀 Oumiya Local Server running cleanly on port ${PORT}`);
+  console.log(`📁 Uploads stored in: ${uploadDir}`);
 });
